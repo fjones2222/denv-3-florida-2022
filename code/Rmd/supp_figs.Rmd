@@ -1,0 +1,302 @@
+---
+title: '"Introduction and spread of dengue virus 3 in Florida, United States, 2022"
+  figures and statistics'
+author: "Forrest Jones"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, eval = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r functions, eval=TRUE}
+
+source("code/R/functions.R")
+
+```
+
+```{r load-data, eval=TRUE}
+
+source("code/R/load_data.R")
+
+```
+
+```{r}
+
+arboNet_linelist %>%
+    filter(year %in% c(2021,2022,2023)) %>%
+  count(denvserotype,travel.status)
+
+```
+
+## Supplemental Figure 1: Epidemic curve of all cases (A) and sequenced cases(B)
+
+```{r seq-epicurve, eval=TRUE, fig.width=13, fig.height=6}
+
+
+
+x_start <- as.Date("2022-04-01")
+x_end <- as.Date("2023-05-01")
+
+
+alt_ec <- denv3_only %>% 
+  mutate(miami=ifelse(County=="Miami-Dade","Miami-Dade County","Other County"))%>%
+  count(case_week,travel.status,miami) %>%
+  ggplot()+
+  geom_col(aes(x=case_week,fill=fct_rev(travel.status),y=n))+
+  scale_x_date("Week of Symptom Onset",date_breaks = "2 months",
+                     limits=c(x_start,x_end))+
+  scale_y_continuous("Number of Cases",
+                         breaks=c(0,10,20,30,40)
+                         )+
+  scale_fill_brewer("Travel Status",
+                    palette="Set1",
+                    direction=-1
+                    )+
+  facet_grid(miami~.,
+             scales = "free_y",space="free_y"
+             ) +
+  cowplot::theme_cowplot()+
+  theme(axis.text.x = element_text(angle = 45,hjust=1)
+        )
+
+
+
+
+seq_ec <- sequences %>% 
+  mutate(miami=ifelse(County=="Miami-Dade","Miami-Dade County","Other County"))%>%
+  count(case_week,`Import Status (US)`,miami) %>%
+  ggplot()+
+  geom_col(aes(x=case_week,fill=fct_rev(`Import Status (US)`),y=n))+
+  scale_x_date("Week of Symptom Onset",date_breaks = "2 months",
+                     limits=c(x_start,x_end))+
+  scale_y_continuous("Number of Cases Sequenced",
+                         breaks=c(seq(0,14,2))
+                         )+
+  scale_fill_brewer("Travel Status",
+                    palette="Set1",
+                    direction=-1
+                    )+
+  facet_grid(miami~.,
+             scales = "free_y",space="free_y"
+             ) +
+  cowplot::theme_cowplot()+
+  theme(axis.text.x = element_text(angle = 45,hjust=1)
+        )
+
+
+
+
+plot_grid(alt_ec + theme(legend.position = c(0.7,0.8)),
+          seq_ec + theme(legend.position = "none"),
+          labels=c("A","B","")
+          )
+
+```
+
+## Supplemental Table 1: Proportion of cases sequenced by county
+
+
+```{r prop-seq-table, eval=TRUE}
+
+bind_rows(
+  denv3_only %>% count(County,travel.status) %>% mutate(Cases="Total"),
+  sequences %>% count(County,travel.status)  %>% mutate(Cases="Sequenced") %>%
+    mutate(County=glue::glue("{County} County"))
+    ) %>%
+  spread(Cases,n) %>%
+  mutate(across(Sequenced:Total,.fns = ~ifelse(is.na(.x),
+                                               0,.x
+                                               )))%>%
+  mutate(seq_percent=glue::glue("{Sequenced}/{Total} ({scales::percent(Sequenced/Total,2)})")) %>%
+  select(County,travel.status,seq_percent)%>%
+  spread(travel.status,seq_percent) %>%
+  mutate(across( `Locally acquired`:`Travel associated`,.fns = ~ifelse(is.na(.x),
+                                              "-",.x
+                                               ))) %>%
+  flextable::flextable() %>%
+  flextable::autofit()
+
+```
+
+
+## Cases and rates by county
+
+Axes are square root transformed
+
+```{r eval=}
+
+
+travel_associated_rates<- denv3_only %>%
+  filter(travel.status=="Travel associated")%>%
+  count(travel.status,County) %>%
+  left_join(pop20) %>% 
+  st_as_sf() %>%
+  ggplot()+
+  geom_sf(data=pop20,fill=NA)+
+  geom_sf(aes(fill=n/value*100000))+
+  scale_fill_fermenter("Cases per 100,000",direction = 1)+
+  theme_void()+
+  facet_wrap(.~travel.status)
+
+locally_associated_rates <- denv3_only %>%
+  filter(travel.status=="Locally acquired")%>%
+  count(travel.status,County) %>%
+  left_join(pop20) %>% 
+  st_as_sf() %>%
+  ggplot()+
+  geom_sf(data=pop20,fill=NA)+
+  geom_sf(aes(fill=n/value*100000))+
+  scale_fill_fermenter("Cases per 100,000",direction = 1)+
+  theme_void()+
+  facet_wrap(.~travel.status)
+
+
+cases_scatter <- denv3_only %>%
+  count(travel.status,County) %>%
+  left_join(pop20) %>%
+  mutate(rate=n) %>%
+  select(County, travel.status,rate)%>%
+  spread(travel.status,rate) %>%
+  right_join(pop20) %>%
+  mutate(`Locally acquired`=ifelse(is.na(`Locally acquired`),
+                                   0,`Locally acquired`
+                                   ),
+         `Travel associated`=ifelse(is.na(`Travel associated`),
+                                   0,`Travel associated`
+                                   )
+         ) %>%
+  ggplot(aes(y=`Locally acquired`,x=`Travel associated`))+
+    geom_hline(yintercept = 1,lty=2)+
+    geom_point(alpha=0.5)+
+    scale_x_continuous("Number of travel associated cases",trans="sqrt")+
+    scale_y_continuous("Number of locally acquired cases",trans="sqrt")+
+    ggrepel::geom_label_repel(aes(label=County))+
+    theme_cowplot()
+
+rates_scatter <- denv3_only %>%
+  count(travel.status,County) %>%
+  left_join(pop20) %>%
+  mutate(rate=n/value*100000) %>%
+  select(County, travel.status,rate)%>%
+  spread(travel.status,rate) %>%
+  right_join(pop20) %>%
+  mutate(`Locally acquired`=ifelse(is.na(`Locally acquired`),
+                                   0,`Locally acquired`
+                                   ),
+         `Travel associated`=ifelse(is.na(`Travel associated`),
+                                   0,`Travel associated`
+                                   )
+         ) %>%
+  ggplot(aes(y=`Locally acquired`,x=`Travel associated`))+
+    geom_point(alpha=0.5)+
+    scale_x_continuous("Travel associated cases per 100,000",trans="sqrt")+
+    scale_y_continuous("Locally acquired cases per 100,000",trans="sqrt")+
+    ggrepel::geom_label_repel(aes(label=County))+
+    theme_cowplot()
+
+
+
+
+
+plot_grid(cases_scatter,
+          rates_scatter,
+          travel_associated_rates,
+          locally_associated_rates,
+          labels = c("A","B","C","D")
+          )
+
+
+```
+
+```{r age-sex}
+
+denv3_only %>%
+  ggplot()+
+  geom_boxplot(aes(col=fct_rev(travel.status),x=sex,y=age))+
+  ylab("Age")+
+  xlab("Sex")+
+  scale_color_brewer("Travel Status",
+                    palette = "Set1",
+                    direction = -1
+                    )+
+  cowplot::theme_cowplot()
+
+```
+
+```{r}
+
+
+denv3_only %>%
+  mutate(under50=age<50) %>%
+  count(race.concat,ethnicity,travel.status,under50) %>%
+  ggplot(aes(x=n))+
+  geom_col(aes(y=paste(race.concat,ethnicity),fill=under50),
+           position = position_dodge2())+
+  facet_grid(.~travel.status,scales = "free_x",space="free_x")+
+  theme_cowplot()
+
+denv3_only %>%
+  count(race.concat,ethnicity,travel.status,sex) %>%
+  ggplot(aes(x=n))+
+  geom_col(aes(y=paste(race.concat,ethnicity),fill=sex),
+           position = position_dodge2())+
+  facet_grid(.~travel.status,scales = "free_x",space="free_x")+
+  theme_cowplot()
+  
+
+
+```
+
+
+
+```{r}
+
+
+arboNet_linelist_raw %>%
+  mutate(case_month=lubridate::floor_date(as.Date(onsetdate),"months"))%>%
+  # filter(case_month<as.Date("2022-01-01"))%>%
+  count(case_month,denvserotype) %>%
+    ggplot(aes(x=case_month,y=n))+
+  geom_col()+
+  facet_wrap(.~denvserotype)
+
+```
+
+
+
+
+
+## traveler figure
+
+```{r}
+
+denv3_only %>%
+  filter(travel.status=="Travel associated")%>%
+  count(countryoforigin) %>%
+  mutate(lab_position=ifelse(countryoforigin=="Cuba",
+                             n-250,n
+                             )) %>%
+  ggplot(aes(y=reorder(countryoforigin,n)))+
+  geom_col(aes(x=n))+
+  geom_text(aes(label=glue::glue("{countryoforigin} (n={n})"),
+                               x=lab_position+5,
+                col=countryoforigin=="Cuba"
+                ),
+            hjust=0
+                )+
+  theme_cowplot()+
+  scale_color_manual(values=c("black","white"))+
+  xlab("Cases")+
+  ylab("Country of Origin")+
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none"
+        )
+
+```
